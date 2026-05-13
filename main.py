@@ -136,7 +136,7 @@ elif page == "Make Prediction":
 
         if prediction == 0:
             label = "Healthy" 
-        else 
+        else:
             label = "Diabetes"
 
         st.subheader(f"Prediction: {label}")
