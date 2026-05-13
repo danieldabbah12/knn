@@ -1,82 +1,138 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+
 from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import accuracy_score
 
-# ── Data ──────────────────────────────────────────────────────────────────────
+# ======================
+# Dataset
+# ======================
+def generate_diabetes_dataset(n=500, noise_ratio=0.1, seed=42):
+    np.random.seed(seed)
+    half = n // 2
+    noise_n = int(n * noise_ratio / 2)
 
-np.random.seed(42)
+    healthy = pd.DataFrame({
+        "blood_sugar": np.random.randint(70, 125, half),
+        "blood_pressure": np.random.randint(65, 90, half),
+        "diabetes": 0
+    })
 
-healthy  = pd.DataFrame({"blood_sugar": np.random.randint(70,  125, 250),
-                          "blood_pressure": np.random.randint(65,  90,  250),
-                          "diabetes": 0})
+    diabetic = pd.DataFrame({
+        "blood_sugar": np.random.randint(130, 220, half),
+        "blood_pressure": np.random.randint(80, 125, half),
+        "diabetes": 1
+    })
 
-diabetic = pd.DataFrame({"blood_sugar": np.random.randint(130, 220, 250),
-                          "blood_pressure": np.random.randint(80,  125, 250),
-                          "diabetes": 1})
+    healthy_noise = pd.DataFrame({
+        "blood_sugar": np.random.randint(120, 145, noise_n),
+        "blood_pressure": np.random.randint(80, 100, noise_n),
+        "diabetes": 0
+    })
 
-df = pd.concat([healthy, diabetic]).sample(frac=1, random_state=42).reset_index(drop=True)
+    diabetic_noise = pd.DataFrame({
+        "blood_sugar": np.random.randint(105, 135, noise_n),
+        "blood_pressure": np.random.randint(70, 95, noise_n),
+        "diabetes": 1
+    })
 
-# ── Model ─────────────────────────────────────────────────────────────────────
+    df = pd.concat(
+        [healthy, diabetic, healthy_noise, diabetic_noise],
+        ignore_index=True
+    )
 
+    df = df.sample(frac=1, random_state=seed).reset_index(drop=True)
+    return df
+
+df = generate_diabetes_dataset()
+
+# ======================
+# Model
+# ======================
 X = df[["blood_sugar", "blood_pressure"]]
 y = df["diabetes"]
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
 
 knn = KNeighborsClassifier(n_neighbors=5)
 knn.fit(X_train, y_train)
+
 y_pred = knn.predict(X_test)
+accuracy = accuracy_score(y_test, y_pred)
 
-# ── App ───────────────────────────────────────────────────────────────────────
+# ======================
+# Sidebar
+# ======================
+st.sidebar.title("Navigation")
 
-st.title("🩺 Diabetes KNN Classifier")
+page = st.sidebar.radio(
+    "Choose a section",
+    ["Dataset", "Model Performance", "Make Prediction"]
+)
 
-page = st.sidebar.radio("Go to", ["Data", "Performance", "Predict"])
+# ======================
+# Page 1: Dataset
+# ======================
+if page == "Dataset":
+    st.title("Dataset")
 
-# ── Page 1 : Data ─────────────────────────────────────────────────────────────
-
-if page == "Data":
-    st.header("Dataset")
+    st.subheader("Data")
     st.dataframe(df)
 
-    st.header("Scatter Plot")
-    st.scatter_chart(df, x="blood_sugar", y="blood_pressure", color="diabetes")
+    st.subheader("Scatter Plot")
 
-# ── Page 2 : Performance ──────────────────────────────────────────────────────
+    st.scatter_chart(
+        df,
+        x="blood_sugar",
+        y="blood_pressure",
+        color="diabetes"
+    )
 
-elif page == "Performance":
-    st.header("Model Performance")
-    st.metric("Accuracy", f"{accuracy_score(y_test, y_pred):.2%}")
+# ======================
+# Page 2: Performance
+# ======================
+elif page == "Model Performance":
+    st.title("Model Performance")
 
-# ── Page 3 : Predict ──────────────────────────────────────────────────────────
+    st.metric("Accuracy", f"{accuracy:.2f}")
 
-elif page == "Predict":
-    st.header("Patient Diagnosis")
+# ======================
+# Page 3: Prediction
+# ======================
+elif page == "Make Prediction":
+    st.title("Predict Diabetes")
 
-    blood_sugar    = st.number_input("Blood Sugar Level (mg/dL)", min_value=40, max_value=300, value=120)
-    blood_pressure = st.number_input("Blood Pressure (mmHg)",     min_value=40, max_value=160, value=80)
+    blood_sugar = st.slider("Blood Sugar", 70, 220, 120)
+    blood_pressure = st.slider("Blood Pressure", 60, 130, 80)
 
-    if st.button("Diagnose"):
-        patient = pd.DataFrame({"blood_sugar": [blood_sugar], "blood_pressure": [blood_pressure]})
-        prediction = knn.predict(patient)[0]
+    if st.button("Predict"):
+        input_data = np.array([[blood_sugar, blood_pressure]])
+        prediction = knn.predict(input_data)[0]
 
-        if prediction == 1:
-            st.error("🔴 Diabetic")
-        else:
-            st.success("🟢 Healthy")
+        label = "Healthy" if prediction == 0 else "Diabetes"
 
-        st.header("Nearest Neighbours on the Map")
-        _, indices = knn.kneighbors(patient)
-        neighbours = df.iloc[indices[0]].copy()
+        st.subheader(f"Prediction: {label}")
 
-        plot_df = df.copy()
-        patient["diabetes"] = prediction
+        # ======================
+        # Add point to plot
+        # ======================
+        new_point = pd.DataFrame({
+            "blood_sugar": [blood_sugar],
+            "blood_pressure": [blood_pressure],
+            "diabetes": [2]  # new category
+        })
 
-        combined = pd.concat([plot_df, patient])
-        st.scatter_chart(combined, x="blood_sugar", y="blood_pressure", color="diabetes")
+        plot_df = pd.concat([df, new_point], ignore_index=True)
 
-        st.subheader("Neighbours")
-        st.dataframe(neighbours[["blood_sugar", "blood_pressure", "diabetes"]])
+        st.subheader("Visualization")
+
+        st.scatter_chart(
+            plot_df,
+            x="blood_sugar",
+            y="blood_pressure",
+            color="diabetes"
+        )
