@@ -1,163 +1,82 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-
 from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import accuracy_score
 
-# ======================
-# Generate dataset
-# ======================
-def generate_diabetes_dataset(n=500, noise_ratio=0.1, seed=42):
-    np.random.seed(seed)
-    half = n // 2
-    noise_n = int(n * noise_ratio / 2)
+# ── Data ──────────────────────────────────────────────────────────────────────
 
-    healthy = pd.DataFrame({
-        "blood_sugar": np.random.randint(70, 125, half),
-        "blood_pressure": np.random.randint(65, 90, half),
-        "diabetes": 0
-    })
+np.random.seed(42)
 
-    diabetic = pd.DataFrame({
-        "blood_sugar": np.random.randint(130, 220, half),
-        "blood_pressure": np.random.randint(80, 125, half),
-        "diabetes": 1
-    })
+healthy  = pd.DataFrame({"blood_sugar": np.random.randint(70,  125, 250),
+                          "blood_pressure": np.random.randint(65,  90,  250),
+                          "diabetes": 0})
 
-    healthy_noise = pd.DataFrame({
-        "blood_sugar": np.random.randint(120, 145, noise_n),
-        "blood_pressure": np.random.randint(80, 100, noise_n),
-        "diabetes": 0
-    })
+diabetic = pd.DataFrame({"blood_sugar": np.random.randint(130, 220, 250),
+                          "blood_pressure": np.random.randint(80,  125, 250),
+                          "diabetes": 1})
 
-    diabetic_noise = pd.DataFrame({
-        "blood_sugar": np.random.randint(105, 135, noise_n),
-        "blood_pressure": np.random.randint(70, 95, noise_n),
-        "diabetes": 1
-    })
+df = pd.concat([healthy, diabetic]).sample(frac=1, random_state=42).reset_index(drop=True)
 
-    df = pd.concat(
-        [healthy, diabetic, healthy_noise, diabetic_noise],
-        ignore_index=True
-    )
+# ── Model ─────────────────────────────────────────────────────────────────────
 
-    df = df.sample(frac=1, random_state=seed).reset_index(drop=True)
-    return df
-
-df = generate_diabetes_dataset()
-
-# ======================
-# Train model
-# ======================
 X = df[["blood_sugar", "blood_pressure"]]
 y = df["diabetes"]
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
-)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
 knn = KNeighborsClassifier(n_neighbors=5)
 knn.fit(X_train, y_train)
-
 y_pred = knn.predict(X_test)
-accuracy = accuracy_score(y_test, y_pred)
 
-# ======================
-# UI - Sidebar
-# ======================
-st.sidebar.title("Navigation")
+# ── App ───────────────────────────────────────────────────────────────────────
 
-page = st.sidebar.radio(
-    "Go to",
-    ["Dataset", "Model Performance", "Make Prediction"]
-)
+st.title("🩺 Diabetes KNN Classifier")
 
-# ======================
-# Colors
-# ======================
-labels = {0: "Healthy", 1: "Diabetes"}
-colors = {0: "#2ECC71", 1: "#E74C3C"}
+page = st.sidebar.radio("Go to", ["Data", "Performance", "Predict"])
 
-# ======================
-# Page 1: Dataset
-# ======================
-if page == "Dataset":
-    st.title("Dataset Visualization")
+# ── Page 1 : Data ─────────────────────────────────────────────────────────────
 
-    st.subheader("DataFrame")
+if page == "Data":
+    st.header("Dataset")
     st.dataframe(df)
 
-    st.subheader("Scatter Plot")
+    st.header("Scatter Plot")
+    st.scatter_chart(df, x="blood_sugar", y="blood_pressure", color="diabetes")
 
-    fig, ax = plt.subplots()
+# ── Page 2 : Performance ──────────────────────────────────────────────────────
 
-    for label in [0, 1]:
-        subset = df[df["diabetes"] == label]
-        ax.scatter(
-            subset["blood_sugar"],
-            subset["blood_pressure"],
-            label=labels[label],
-            color=colors[label],
-            alpha=0.7
-        )
+elif page == "Performance":
+    st.header("Model Performance")
+    st.metric("Accuracy", f"{accuracy_score(y_test, y_pred):.2%}")
 
-    ax.set_xlabel("Blood Sugar")
-    ax.set_ylabel("Blood Pressure")
-    ax.legend()
-    ax.grid(alpha=0.3)
+# ── Page 3 : Predict ──────────────────────────────────────────────────────────
 
-    st.pyplot(fig)
+elif page == "Predict":
+    st.header("Patient Diagnosis")
 
-# ======================
-# Page 2: Model Performance
-# ======================
-elif page == "Model Performance":
-    st.title("Model Performance")
+    blood_sugar    = st.number_input("Blood Sugar Level (mg/dL)", min_value=40, max_value=300, value=120)
+    blood_pressure = st.number_input("Blood Pressure (mmHg)",     min_value=40, max_value=160, value=80)
 
-    st.write(f"Accuracy: **{accuracy:.2f}**")
+    if st.button("Diagnose"):
+        patient = pd.DataFrame({"blood_sugar": [blood_sugar], "blood_pressure": [blood_pressure]})
+        prediction = knn.predict(patient)[0]
 
-# ======================
-# Page 3: Prediction
-# ======================
-elif page == "Make Prediction":
-    st.title("Predict Diabetes")
+        if prediction == 1:
+            st.error("🔴 Diabetic")
+        else:
+            st.success("🟢 Healthy")
 
-    blood_sugar = st.slider("Blood Sugar", 70, 220, 120)
-    blood_pressure = st.slider("Blood Pressure", 60, 130, 80)
+        st.header("Nearest Neighbours on the Map")
+        _, indices = knn.kneighbors(patient)
+        neighbours = df.iloc[indices[0]].copy()
 
-    if st.button("Predict"):
-        input_data = np.array([[blood_sugar, blood_pressure]])
-        prediction = knn.predict(input_data)[0]
+        plot_df = df.copy()
+        patient["diabetes"] = prediction
 
-        st.subheader(f"Prediction: {labels[prediction]}")
+        combined = pd.concat([plot_df, patient])
+        st.scatter_chart(combined, x="blood_sugar", y="blood_pressure", color="diabetes")
 
-        # Plot with new point
-        fig, ax = plt.subplots()
-
-        for label in [0, 1]:
-            subset = df[df["diabetes"] == label]
-            ax.scatter(
-                subset["blood_sugar"],
-                subset["blood_pressure"],
-                color=colors[label],
-                alpha=0.5
-            )
-
-        # New point
-        ax.scatter(
-            blood_sugar,
-            blood_pressure,
-            color="blue",
-            s=150,
-            label="New Patient",
-            edgecolors="black"
-        )
-
-        ax.set_xlabel("Blood Sugar")
-        ax.set_ylabel("Blood Pressure")
-        ax.legend()
-        ax.grid(alpha=0.3)
-
-        st.pyplot(fig)
+        st.subheader("Neighbours")
+        st.dataframe(neighbours[["blood_sugar", "blood_pressure", "diabetes"]])
